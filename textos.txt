@@ -1,0 +1,71 @@
+# ==============================
+# textos.txt
+# Formato: inicio-fin | texto
+# Tiempos en segundos (acepta decimales, ej. 10.5-12.3)
+# Líneas con # se ignoran
+# ==============================
+
+Video_1
+0-3 | Aero Performance & Aero Design are not the same
+3-7 | Aero Performance: Analyzes on track data
+7-11 | AP: "What's the Aero Balance shift after this crash?"
+11-15 | Aero Designer: Designs the aerodynamic package of the car
+15-18 | AD: "Let's simulate this new sidepod geometry"
+19-20 | Which one interests you most?
+
+Video_2
+0-3 | Los 3 errores que te cuestan el trabajo en F1
+4-9 | 1. Aplicar solo a Ferrari, Red Bull y Mercedes
+10-14 | 2. CV genérico sin proyectos propios
+15-20 | 3. No saber qué hace el equipo
+
+Video_3
+# (vacío, se copiará tal cual)
+
+Video_4
+0-5 | Cómo entré en F1 en 6 meses
+
+Video_5
+# (vacío)
+
+Video_6
+# (vacío)
+
+Video_7
+# (vacío)
+
+Video_8
+# (vacío)
+
+Video_9
+# (vacío)
+
+Video_10
+# (vacío)
+
+Video_11
+# (vacío)
+
+Video_12
+# (vacío)
+
+Video_13
+# (vacío)
+
+Video_14
+# (vacío)
+
+Video_15
+# (vacío)
+
+Video_16
+# (vacío)
+
+Video_17
+# (vacío)
+
+Video_18
+# (vacío)
+
+Video_19
+# (vacío)

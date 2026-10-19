@@ -1,0 +1,19 @@
+# Ignorar carpetas de videos
+Videos/
+Videos_Editados/
+
+# Ignorar cualquier archivo de video o audio
+*.mp4
+*.mp3
+*.wav
+*.mov
+
+# Ignorar el entorno virtual
+.venv/
+__pycache__/
+
+# Ignorar archivos del sistema Mac
+.DS_Store
+
+# Ignorar el archivo de descarga que veo en tu captura
+*.download
