@@ -12,6 +12,10 @@ Videos_Editados/
 .venv/
 __pycache__/
 
+# Ignorar variables de entorno (API keys)
+.env
+.env.local
+
 # Ignorar archivos del sistema Mac
 .DS_Store
 

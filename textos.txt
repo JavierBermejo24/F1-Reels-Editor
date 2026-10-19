@@ -1,71 +1,37 @@
 # ==============================
-# textos.txt
-# Formato: inicio-fin | texto
-# Tiempos en segundos (acepta decimales, ej. 10.5-12.3)
-# Líneas con # se ignoran
+# textos.txt — MULTI-video con marcador process Y/N
+# Formato por bloque:
+#   Video_1 | process: Y
+#   (una línea de guion por renglón)
+#
+# Reglas:
+#   - Solo se procesa si process=Y Y tiene texto.
+#   - process=N -> se ignora siempre.
+#   - process=Y pero sin texto -> se ignora.
+#   - El nombre es el nombre de salida en Videos_Editados/<nombre>.mp4
+#     (ej. Video_1 -> Videos_Editados/Video_1.mp4).
+#     El fondo se arma solo con bricks aleatorios de "Video Bricks/".
+# Variantes válidas de cabecera:
+#   Video_1 | process: Y     (recomendado)
+#   Video_1, process=Y
+#   Video_1
+#   process: Y               (en la línea siguiente)
+# Líneas con # y líneas vacías se ignoran.
 # ==============================
 
-Video_1
-0-3 | Aero Performance & Aero Design are not the same
-3-7 | Aero Performance: Analyzes on track data
-7-11 | AP: "What's the Aero Balance shift after this crash?"
-11-15 | Aero Designer: Designs the aerodynamic package of the car
-15-18 | AD: "Let's simulate this new sidepod geometry"
-19-20 | Which one interests you most?
+Video_1 | process: Y
+Aero Performance & Aero Design are not the same.
+The Aero Performance Engineer is the one in charge of Analysing track data, understanding performance losses after crashes or wind gusts and ensuring the car performs as expected.
+Coding proficiency is required to pull, manipulate and interpret the data.
+The Aero Designer, on the other hand, Designs the aerodynamic package of the car, requiring a deeper understanding of how air particles travel around the car.
 
-Video_2
-0-3 | Los 3 errores que te cuestan el trabajo en F1
-4-9 | 1. Aplicar solo a Ferrari, Red Bull y Mercedes
-10-14 | 2. CV genérico sin proyectos propios
-15-20 | 3. No saber qué hace el equipo
+Video_2 | process: N
+Este video se ignora porque es process N, aunque tenga texto.
+No se generará voz ni edición para él.
 
-Video_3
-# (vacío, se copiará tal cual)
+Video_3 | process: Y
+# Este está en Y pero sin texto real -> también se ignora.
+# Escribe aquí tu guion, una línea por renglón.
 
-Video_4
-0-5 | Cómo entré en F1 en 6 meses
-
-Video_5
-# (vacío)
-
-Video_6
-# (vacío)
-
-Video_7
-# (vacío)
-
-Video_8
-# (vacío)
-
-Video_9
-# (vacío)
-
-Video_10
-# (vacío)
-
-Video_11
-# (vacío)
-
-Video_12
-# (vacío)
-
-Video_13
-# (vacío)
-
-Video_14
-# (vacío)
-
-Video_15
-# (vacío)
-
-Video_16
-# (vacío)
-
-Video_17
-# (vacío)
-
-Video_18
-# (vacío)
-
-Video_19
-# (vacío)
+Video_4 | process: N
+# Cambia a Y y escribe texto para procesarlo.
