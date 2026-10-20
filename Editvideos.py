@@ -8,7 +8,7 @@ import tempfile
 import numpy as np
 import imageio_ffmpeg
 import PIL.Image
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 if not hasattr(PIL.Image, 'ANTIALIAS'):
     PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
@@ -20,31 +20,45 @@ from dotenv import load_dotenv
 
 load_dotenv()
 from moviepy.editor import (
-    VideoFileClip, ImageClip, CompositeVideoClip,
+    VideoFileClip, ImageClip, CompositeVideoClip, ColorClip,
     AudioFileClip, CompositeAudioClip, concatenate_videoclips,
 )
 
 # ============ CONFIGURACIÓN ============
 CARPETA_SCRIPT = os.path.dirname(os.path.abspath(__file__))
 CARPETA_VIDEOS = os.path.join(CARPETA_SCRIPT, "Videos")
-CARPETA_BRICKS = os.path.join(CARPETA_SCRIPT, "Video Bricks")
+CARPETA_BRICKS = os.path.join(CARPETA_SCRIPT, "Post Processed Videos")
+# Los bricks ya vienen recortados (sin logo F1) y con trims desde
+# Postprocess_bricks.py -> NO se aplica el crop anti-logo de nuevo
+# (aplicarlo dos veces haría zoom excesivo). Solo se concatena.
+BRICKS_YA_RECORTADOS = True
 CARPETA_SALIDA = os.path.join(CARPETA_SCRIPT, "Videos_Editados")
 ARCHIVO_TEXTO = os.path.join(CARPETA_SCRIPT, "textos.txt")
 
 CROP_TOP_PCT = 0.22  # franja superior eliminada: saca el logo F1 (incl. variante "F1 SPRINT") con margen
 CROP_REESCALAR_A_ORIGINAL = True  # tras recortar, reescalar a W×H original (zoom) para salida 1080x1920 sin bandas
 
-# --- B-ROLL aleatorio desde "Video Bricks" ---
+# --- B-ROLL aleatorio desde "Post Processed Videos" ---
 MARGEN_FINAL = 1.0          # 1s extra al final: video = voz + 1s
 BRICK_SPEED_MIN = 0.95      # solo si es estrictamente necesario
 BRICK_SPEED_MAX = 1.05      # solo si es estrictamente necesario
 BRICK_MIN_FRAGMENTO = 1.0   # evita cortes <1s en el último brick (usa speed o best-fit)
 BRICK_EXTS = (".mp4", ".mov", ".m4v")
 
-# --- VOICE OVER: pago (OpenRouter) por defecto / gratis (edge-tts) para pruebas ---
-# TTS_BACKEND: "openrouter" (elevenlabs/eleven-v4, pago, pro) | "edge" (gratis, pruebas)
-# Cambia con env: TTS_BACKEND=edge para pruebas con AvaNeural.
-TTS_BACKEND = os.getenv("TTS_BACKEND", "openrouter").strip().lower()
+# --- END CARD: fundido a negro + logo RC 1.5s ---
+ENDCARD_ACTIVO = True
+ENDCARD_LOGO = os.path.join(CARPETA_SCRIPT, "RC-Logo on Black Full.jpg")
+ENDCARD_DUR = 1.5                # el cierre ocupa los últimos 1.5s (no alarga el video)
+ENDCARD_ANCHO_PCT = 0.86         # ancho del logo respecto al video
+ENDCARD_FADE_NEGRO = 0.9         # fundido del negro (fade-through-black, más progresivo)
+ENDCARD_LOGO_DELAY = 0.35        # el logo aparece 0.35s tras empezar el negro
+ENDCARD_LOGO_FADE = 0.5          # fundido de entrada del logo (lineal)
+ENDCARD_LOGO_ZOOM = (0.94, 1.0)  # escala suave 0.94 -> 1.0 durante su aparición
+
+# --- VOICE OVER: gratis (edge-tts) por defecto / pago (OpenRouter) para final ---
+# TTS_BACKEND: "edge" (gratis, AvaNeural) | "openrouter" (elevenlabs/eleven-v4, pago)
+# Cambia con env: TTS_BACKEND=openrouter para la voz final de pago.
+TTS_BACKEND = os.getenv("TTS_BACKEND", "edge").strip().lower()
 EDGE_VOICE = os.getenv("EDGE_VOICE", "en-US-AvaNeural")  # AvaNeural Female USA (gratis)
 # --- OpenRouter (pago, voz final) — se conserva para la versión definitiva ---
 # Model page: https://openrouter.ai/elevenlabs/eleven-v4
@@ -55,7 +69,19 @@ OPENROUTER_VOICE = os.getenv("OPENROUTER_VOICE", "george")
 OPENROUTER_RESPONSE_FORMAT = os.getenv("OPENROUTER_RESPONSE_FORMAT", "mp3")
 VOLUMEN_VIDEO_ORIGINAL = 0.0
 GENERAR_SRT = True
-VELOCIDAD_VOZ = 1.2  # +20% velocidad (eleven-v4 no acepta speed -> se acelera localmente con ffmpeg atempo)
+# --- ENTREGA VIRAL REELS (Instagram) ---
+# Ritmo: narración ~30% más rápida que conversacional (rápida pero inteligible
+# en short-form con subtítulos grandes). El atempo local preserva el tono.
+# eleven-v4 no acepta `speed` en la API (devuelve 400) -> se acelera con ffmpeg.
+VELOCIDAD_VOZ = 1.3
+# Tono/energía: la API de OpenRouter ignora `instructions` en elevenlabs
+# (solo la honran OpenAI/Gemini/Fish), así que la energía se dirige en el
+# TEXTO (100% compatible y sin cambiar nº de palabras -> el alineamiento
+# de subtítulos sigue exacto):
+#   1) Hook: la 1ª frase termina en "!" (más pegada).
+#   2) Frases largas: ", " -> ". " cuando el segmento pasa de 15 palabras
+#      (frases cortas y percutivas en vez de enumeraciones planas).
+REELS_PUNCH = True
 
 # --- ESTILO DE SUBTÍTULOS (ESTILO REELS / INSTAGRAM) ---
 SUBTITULO_Y_PCT = 0.62           # Posición vertical
@@ -64,14 +90,20 @@ SUBTITULO_MAX_WORDS_LINE = 20    # Tope de seguridad; el límite real es el anch
 SUBTITULO_ESCALA_ACTIVA = 1.10   # La palabra activa se agranda un 10%
 SUBTITULO_ADELANTO = 0.04        # Mostrar cada palabra 40ms antes (compensa latencia percibida)
 SUBTITULO_COLOR_BASE = (255, 255, 255, 255)      # Palabras inactivas: blanco relleno
-# Palabra activa: PRUEBA sólido verde #14e314 (antes degradado azul #00d9fd->#0169fe)
-SUBTITULO_COLOR_ACTIVA = (0x14, 0xE3, 0x14, 255)  # #14e314 sólido
+# Palabra activa: azul sólido #01abfe, SIN contorno negro
+SUBTITULO_COLOR_ACTIVA = (0x01, 0xAB, 0xFE, 255)  # #01abfe sólido
 SUBTITULO_USAR_DEGRADADO = False                 # False = relleno sólido (prueba), True = degradado azul
 # (degradado anterior, conservado por si se quiere volver)
 SUBTITULO_GRADIENT_TOP = (0x00, 0xD9, 0xFD, 255)     # #00d9fd arriba
 SUBTITULO_GRADIENT_BOTTOM = (0x01, 0x69, 0xFE, 255)  # #0169fe abajo
 SUBTITULO_STROKE_COLOR = (0, 0, 0, 255)          # Contorno negro
-SUBTITULO_STROKE_WIDTH = 5                       # Grosor del contorno (+30% sobre 4)
+SUBTITULO_STROKE_WIDTH = 0                       # Sin contorno negro
+# Sombra suave (legibilidad sobre fondos claros sin contorno duro):
+SUBTITULO_SOMBRA = True                        # False = sin sombra
+SUBTITULO_SOMBRA_COLOR = (0, 0, 0, 170)         # Negro semitransparente
+SUBTITULO_SOMBRA_DX = 0                        # Desplazamiento horizontal px
+SUBTITULO_SOMBRA_DY = 5                        # Desplazamiento vertical px
+SUBTITULO_SOMBRA_BLUR = 8                      # Radio de desenfoque (suavidad)
 SUBTITULO_MAX_WIDTH_PCT = 0.96                   # Menos padding: el texto se acerca a los bordes
 SUBTITULO_PAUSA_ENTRE_BLOQUES = 0.25             # Pausa (s) entre audios secuenciales
 
@@ -288,7 +320,7 @@ def resolver_video_entrada(bloques=None):
             base = os.path.basename(ruta)
             nombre = base[:-4] if base.lower().endswith(".mp4") else base
         else:
-            return None, None
+            return None, None, None
     if bloques is not None and nombre in bloques:
         _, guiones = bloques[nombre]
         return ruta, nombre, guiones
@@ -476,7 +508,7 @@ def _acelerar_audio(ruta, factor):
         return True
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
     tmp = ruta + ".fast.mp3"
-    # atempo acepta 0.5-2.0 en un solo filtro; 1.2 va directo
+    # atempo acepta 0.5-2.0 en un solo filtro; 1.3 va directo
     cmd = [ffmpeg, "-y", "-v", "error", "-i", ruta,
            "-filter:a", f"atempo={factor}", "-vn", tmp]
     res = subprocess.run(cmd, capture_output=True, text=True)
@@ -485,6 +517,47 @@ def _acelerar_audio(ruta, factor):
         return False
     os.replace(tmp, ruta)
     return True
+
+
+def _estilo_reels(texto):
+    """Dirige la entrega viral sin cambiar el nº de palabras (alineamiento intacto).
+
+    1) Hook: la primera frase termina en "!" si terminaba en ".".
+    2) Frases largas: ", " -> ". " cuando el segmento supera 15 palabras.
+    Devuelve (texto_transformado, cambió_bool).
+    """
+    if not texto or not texto.strip():
+        return texto, False
+    original = texto
+    # 1) Hook con pegada
+    texto = texto.strip()
+    m = re.match(r'^([^.!?]+)\.\s+(.*)$', texto, re.DOTALL)
+    if m and len(m.group(1).split()) >= 3:
+        texto = m.group(1).rstrip() + "! " + m.group(2).lstrip()
+    # 2) Partir enumeraciones largas en frases cortas percutivas
+    partes = re.split(r'(?<=[.!?])\s+', texto)
+    nuevas = []
+    for p in partes:
+        if p.count(" ") >= 15 and ", " in p:
+            # corta por la coma más cercana a la mitad
+            trozos = p.split(", ")
+            izq, der = [], []
+            mitad = len(p.split()) / 2
+            acc = 0
+            for i, t in enumerate(trozos):
+                if acc + len(t.split()) < mitad or not izq:
+                    izq.append(t)
+                    acc += len(t.split())
+                else:
+                    der = trozos[i:]
+                    break
+            if der and len(der[0].split()) >= 3 and not re.search(r'\b(e\.g|i\.e|vs)\.?$', izq[-1].strip(), re.I):
+                p = ", ".join(izq).rstrip() + ". " + ", ".join(der).lstrip()
+                # mayúscula tras el punto nuevo
+                p = re.sub(r'\. ([a-z])', lambda mm: ". " + mm.group(1).upper(), p, count=1)
+        nuevas.append(p)
+    texto = " ".join(nuevas)
+    return texto, (texto != original)
 
 
 def generar_voz_con_palabras(texto, ruta, target_dur=None, voice_id=None):
@@ -498,7 +571,12 @@ def generar_voz_con_palabras(texto, ruta, target_dur=None, voice_id=None):
     mejorado por peso de palabra entre silencios medidos. Al final se
     adelanta todo SUBTITULO_ADELANTO para que el highlight no llegue tarde.
     El audio se acelera xVELOCIDAD_VOZ vía ffmpeg atempo.
+    Si REELS_PUNCH, el texto se dirige a entrega viral (_estilo_reels).
     """
+    if REELS_PUNCH:
+        texto, cambio = _estilo_reels(texto)
+        if cambio:
+            print(f"   ⚡ Reels punch: {texto[:90]}...")
     backend = (TTS_BACKEND or "edge").lower()
     if backend == "openrouter":
         vid = voice_id or OPENROUTER_VOICE
@@ -590,8 +668,8 @@ def _gradiente_vertical_rgba(w, h, color_top, color_bottom):
 
 def crear_subtitulo_linea(linea, video_w, video_h, fuente_path):
     """Para cada palabra de la línea dibuja la línea completa:
-    la palabra que se pronuncia, 10% más grande y con relleno sólido
-    verde #14e314 (prueba); el resto, blancas.
+    la palabra que se pronuncia, 10% más grande y en azul #01abfe;
+    el resto, blancas. Sin contorno: legibilidad vía sombra suave.
     Cuando termina la última palabra, la siguiente línea toma el relevo."""
     if not linea:
         return []
@@ -622,11 +700,17 @@ def crear_subtitulo_linea(linea, video_w, video_h, fuente_path):
         max_asc = max(asc_b, asc_g)
         text_h = max_asc + max(desc_b, desc_g)
         margin = SUBTITULO_STROKE_WIDTH * 2 + int(sg * 0.15)
+        if SUBTITULO_SOMBRA:
+            margin += SUBTITULO_SOMBRA_BLUR + max(abs(SUBTITULO_SOMBRA_DX),
+                                                  abs(SUBTITULO_SOMBRA_DY)) + 2
         img_w = int(total_w + margin * 2)
         img_h = int(text_h + margin * 2)
 
         img_linea = Image.new("RGBA", (img_w, img_h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img_linea)
+        capa_sombra = (Image.new("RGBA", (img_w, img_h), (0, 0, 0, 0))
+                       if SUBTITULO_SOMBRA else None)
+        draw_sombra = ImageDraw.Draw(capa_sombra) if capa_sombra else None
 
         current_x = margin
         y_base = margin + max_asc  # línea base común (la palabra activa sobresale)
@@ -637,6 +721,10 @@ def crear_subtitulo_linea(linea, video_w, video_h, fuente_path):
             font = fg if j == i else fb
             asc, _ = font.getmetrics()
             xy = (current_x, y_base - asc)
+            if draw_sombra:
+                draw_sombra.text((xy[0] + SUBTITULO_SOMBRA_DX,
+                                  xy[1] + SUBTITULO_SOMBRA_DY),
+                                 t, font=font, fill=SUBTITULO_SOMBRA_COLOR)
             if j == i:
                 # 1) Contorno + base negra para la palabra activa
                 draw.text(xy, t, font=font, fill=SUBTITULO_STROKE_COLOR,
@@ -650,7 +738,7 @@ def crear_subtitulo_linea(linea, video_w, video_h, fuente_path):
                           stroke_width=SUBTITULO_STROKE_WIDTH, stroke_fill=SUBTITULO_STROKE_COLOR)
             current_x += widths[j] + space_w
 
-        # 2) Relleno palabra activa: sólido verde #14e314 (prueba) o degradado azul
+        # 2) Relleno palabra activa: sólido azul #01abfe o degradado
         if active_xy is not None:
             if SUBTITULO_USAR_DEGRADADO:
                 mascara = Image.new("L", (img_w, img_h), 0)
@@ -666,6 +754,12 @@ def crear_subtitulo_linea(linea, video_w, video_h, fuente_path):
                           fill=SUBTITULO_COLOR_ACTIVA,
                           stroke_width=SUBTITULO_STROKE_WIDTH,
                           stroke_fill=SUBTITULO_STROKE_COLOR)
+
+        # 3) Sombra suave debajo del texto (se difumina y se compone detrás)
+        if capa_sombra is not None:
+            capa_sombra = capa_sombra.filter(
+                ImageFilter.GaussianBlur(SUBTITULO_SOMBRA_BLUR))
+            img_linea = Image.alpha_composite(capa_sombra, img_linea)
 
         # Transición instantánea, sin solape: cada clip termina exactamente
         # cuando empieza la siguiente palabra (w_end ya es contiguo al
@@ -720,6 +814,47 @@ def aplicar_crop(video):
             recortado = recortado.resize((w, h))
     return recortado
 
+def _mascara_fundido(size, dur_clip, dur_fade):
+    """Máscara 0->1 para fundidos de opacidad reales.
+
+    (El fadein/fadeout normal de moviepy 1.0.3 sobre clips NO-máscara solo
+    disuelve el RGB hacia negro, no anima la opacidad: un negro fundiendo
+    "desde negro" se queda negro = corte seco. Por eso se anima la máscara.)
+    """
+    return (ColorClip(size=size, color=1.0, ismask=True)
+            .set_duration(dur_clip).fadein(dur_fade))
+
+
+def construir_endcard(video_w, video_h):
+    """End card 1.5s: fundido a negro + logo RC centrado con fade y zoom suave.
+
+    El logo (apaisado, fondo negro) se ajusta al 86% del ancho y se centra;
+    el negro funde desde el B-roll (fade-through-black) y el logo entra con
+    fade + escala 0.94->1.0. Devuelve CompositeVideoClip o None si no hay logo.
+    """
+    if not ENDCARD_ACTIVO or not os.path.exists(ENDCARD_LOGO):
+        if ENDCARD_ACTIVO:
+            print(f"   ⚠️  Endcard omitido: no existe {ENDCARD_LOGO}")
+        return None, []
+    negro = ColorClip(size=(video_w, video_h), color=(0, 0, 0)).set_duration(ENDCARD_DUR)
+    negro = negro.set_mask(_mascara_fundido((video_w, video_h), ENDCARD_DUR, ENDCARD_FADE_NEGRO))
+    logo_w = int(video_w * ENDCARD_ANCHO_PCT)
+    logo = ImageClip(ENDCARD_LOGO).resize(width=logo_w)
+    logo = logo.set_position("center").set_duration(ENDCARD_DUR - ENDCARD_LOGO_DELAY)
+    # Zoom suave durante la aparición.
+    # OJO: el resize animado va ANTES del set_mask (moviepy 1.0.3 rompe
+    # la máscara float si se redimensiona después).
+    z0, z1 = ENDCARD_LOGO_ZOOM
+    try:
+        logo = logo.resize(lambda t: z0 + (z1 - z0) * min(max(t, 0.0) / max(logo.duration, 0.01), 1.0))
+    except Exception:
+        pass
+    logo = logo.set_mask(_mascara_fundido(logo.size, logo.duration, ENDCARD_LOGO_FADE))
+    logo = logo.set_start(ENDCARD_LOGO_DELAY)  # el fade lo lleva su máscara
+    endcard = CompositeVideoClip([negro, logo], size=(video_w, video_h)).set_duration(ENDCARD_DUR)
+    return endcard, [logo]
+
+
 def _fmt_srt(t):
     h = int(t // 3600); m = int((t % 3600) // 60); s = int(t % 60)
     ms = int(round((t - int(t)) * 1000))
@@ -730,7 +865,7 @@ def escribir_srt(entradas, ruta):
         for i, (ini, fin, texto) in enumerate(entradas, 1):
             f.write(f"{i}\n{_fmt_srt(ini)} --> {_fmt_srt(fin)}\n{texto}\n\n")
 
-# ---------- B-ROLL aleatorio desde "Video Bricks" ----------
+# ---------- B-ROLL aleatorio desde "Post Processed Videos" ----------
 _CACHE_DUR_BRICKS = {}  # ruta -> duración (se mide una vez por ejecución)
 
 def _listar_bricks():
@@ -947,7 +1082,7 @@ def construir_broll(target_dur):
 
 # ---------- EDICIÓN (B-roll aleatorio + voz) ----------
 def editar_video(nombre, guiones, fuente, carpeta_temp, ruta_in=None):
-    """Guion -> TTS -> B-roll aleatorio desde 'Video Bricks'.
+    """Guion -> TTS -> B-roll aleatorio desde 'Post Processed Videos'.
 
     1) Genera la voz (1 llamada TTS) y mide dur_audio.
     2) target = dur_audio + MARGEN_FINAL (1s de margen al final).
@@ -972,6 +1107,8 @@ def editar_video(nombre, guiones, fuente, carpeta_temp, ruta_in=None):
     video = None
     final = None
     capa_audio = None
+    endcard = None
+    endcard_hijos = []
 
     try:
         # --- 1) TTS primero para conocer la duración objetivo ---
@@ -987,10 +1124,10 @@ def editar_video(nombre, guiones, fuente, carpeta_temp, ruta_in=None):
         target_dur = dur_audio + MARGEN_FINAL
         dur_usable = dur_audio
 
-        # --- 2) B-roll aleatorio ---
+        # --- 2) B-roll aleatorio (ya sin logo: no se recorta de nuevo) ---
         try:
             broll_raw, broll_abiertos, _sel = construir_broll(target_dur)
-            video = aplicar_crop(broll_raw)
+            video = broll_raw if BRICKS_YA_RECORTADOS else aplicar_crop(broll_raw)
         except Exception as e_broll:
             print(f"   ⚠️  B-roll falló ({str(e_broll)[:200]}), intento fallback legacy.")
             broll_raw = None
@@ -1039,11 +1176,43 @@ def editar_video(nombre, guiones, fuente, carpeta_temp, ruta_in=None):
             a = AudioFileClip(ruta_audio)
             if a.duration > dur_usable:
                 a = a.subclip(0, dur_usable)
+            # 1) Corta todo lo que haya después de la última palabra + 0.20s
+            #    de decaimiento natural. Ahí vive el "sonidito": resto de
+            #    síntesis tras "around the car". Anclado a palabras, así que
+            #    nunca recorta voz real.
+            try:
+                if words_full:
+                    _fin_ultima = max(e for _, _, e in words_full if e <= dur_usable + 0.01)
+                    _corte = min(a.duration, _fin_ultima + 0.20)
+                    if _corte < a.duration - 0.05 and _corte > 0.5:
+                        a = a.subclip(0, _corte)
+            except Exception:
+                pass
+            # 2) Fundido de salida: la voz nunca corta en seco (evita click/pop
+            #    justo en "around the car" / última palabra).
+            try:
+                from moviepy.audio.fx.audio_fadeout import audio_fadeout
+                a = a.fx(audio_fadeout, min(0.3, a.duration / 2))
+            except Exception:
+                pass
             a = a.set_start(0)
             capa_audio = a
             pistas_audio.append(a)
 
         final = CompositeVideoClip([video] + capas_subtitulo, size=(video.w, video.h))
+
+        # --- End card: fundido a negro + logo RC en los últimos 1.5s ---
+        try:
+            _d = float(video.duration)
+            if ENDCARD_ACTIVO and _d > ENDCARD_DUR + 0.5:
+                endcard, endcard_hijos = construir_endcard(video.w, video.h)
+                if endcard is not None:
+                    final = CompositeVideoClip(
+                        [final, endcard.set_start(_d - ENDCARD_DUR)],
+                        size=(video.w, video.h)).set_duration(_d)
+                    print(f"   🏁 Endcard: fundido a negro + logo últimos {ENDCARD_DUR}s.")
+        except Exception as e_ec:
+            print(f"   ⚠️  Endcard falló ({str(e_ec)[:150]}), se sigue sin cierre.")
 
         if pistas_audio:
             final = final.set_audio(CompositeAudioClip(pistas_audio))
@@ -1097,15 +1266,26 @@ def editar_video(nombre, guiones, fuente, carpeta_temp, ruta_in=None):
                 video_original.close()
         except Exception:
             pass
+        for c in endcard_hijos:
+            try:
+                c.close()
+            except Exception:
+                pass
+        try:
+            if endcard is not None:
+                endcard.close()
+        except Exception:
+            pass
 
 def main():
     """Modo multi-video con marcador process Y/N + B-roll aleatorio:
     - Solo se procesan bloques con process=Y Y con texto.
     - process=N o sin texto -> se ignoran.
-    - El fondo se arma aleatoriamente desde 'Video Bricks' en cada generación:
-      se mide la voz TTS, target = voz + 1s, se barajan los bricks y se
-      concatenan hasta cubrir el target (velocidad 0.95-1.05 solo si es
-      estrictamente necesario). Cada ejecución da una combinación distinta.
+    - El fondo se arma aleatoriamente desde 'Post Processed Videos' en cada
+      generación (bricks ya sin logo F1 y con trims): se mide la voz TTS,
+      target = voz + 1s, se barajan los bricks y se concatenan hasta cubrir
+      el target (velocidad 0.95-1.05 solo si es estrictamente necesario).
+      Cada ejecución da una combinación distinta.
     - Override manual: argv[1] o VIDEO_ENTRADA procesa UN solo video
       (ignora el marcador, usa su guion si existe).
     - Legacy: si textos.txt no tiene cabeceras, se procesa 1 video con B-roll.
@@ -1115,9 +1295,10 @@ def main():
     fuente = encontrar_fuente()
 
     print(f"🔤 Fuente: {fuente}")
-    print(f"✂️  Crop anti-logo F1: {int(CROP_TOP_PCT*100)}% arriba + laterales centrados, reescala a original")
+    print(f"🧱 Bricks: {CARPETA_BRICKS} (ya sin logo F1, sin re-crop)")
     print(f"🎙️  Voz: backend={TTS_BACKEND} "
-          f"({'model=' + OPENROUTER_TTS_MODEL + ' voice=' + OPENROUTER_VOICE if (TTS_BACKEND or '') == 'openrouter' else 'voice=' + EDGE_VOICE + ' (gratis)'})")
+          f"({'model=' + OPENROUTER_TTS_MODEL + ' voice=' + OPENROUTER_VOICE if (TTS_BACKEND or '') == 'openrouter' else 'voice=' + EDGE_VOICE + ' (gratis)'}) "
+          f"| reels x{VELOCIDAD_VOZ}{'+punch' if REELS_PUNCH else ''}")
     print(f"💬 Subtítulos: Estilo Reels (palabra activa ampliada x{SUBTITULO_ESCALA_ACTIVA}, líneas al ancho de pantalla)")
 
     # --- Override manual: un solo video indicado por argv/env ---

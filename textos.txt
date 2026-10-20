@@ -8,9 +8,7 @@
 #   - Solo se procesa si process=Y Y tiene texto.
 #   - process=N -> se ignora siempre.
 #   - process=Y pero sin texto -> se ignora.
-#   - El nombre es el nombre de salida en Videos_Editados/<nombre>.mp4
-#     (ej. Video_1 -> Videos_Editados/Video_1.mp4).
-#     El fondo se arma solo con bricks aleatorios de "Video Bricks/".
+#   - El nombre debe coincidir con Videos/<nombre>.mp4 (ej. Video_1 -> Videos/Video_1.mp4)
 # Variantes válidas de cabecera:
 #   Video_1 | process: Y     (recomendado)
 #   Video_1, process=Y
@@ -19,17 +17,29 @@
 # Líneas con # y líneas vacías se ignoran.
 # ==============================
 
-Video_1 | process: Y
+Video_1 | process: N
 Aero Performance & Aero Design are not the same.
 The Aero Performance Engineer is the one in charge of Analysing track data, understanding performance losses after crashes or wind gusts and ensuring the car performs as expected.
 Coding proficiency is required to pull, manipulate and interpret the data.
 The Aero Designer, on the other hand, Designs the aerodynamic package of the car, requiring a deeper understanding of how air particles travel around the car.
 
-Video_2 | process: N
-Este video se ignora porque es process N, aunque tenga texto.
-No se generará voz ni edición para él.
+Video_2 | process: Y
 
-Video_3 | process: Y
+Hot take: Formula 1 doesn’t hire fans. It hires engineers.
+
+And yeah... everyone in the paddock is passionate. Every single person. Passion is the baseline, not the differentiator.
+
+Teams need people who can solve problems, analyze data, and perform under pressure.
+Knowing every pole position won’t get you hired. Demonstrating technical skills will.
+
+So stop leading with ‘I love F1.’  Start leading with proof. 
+Show a project where you built something, tested it, broke it, fixed it, and measured the result.
+
+So be a fan in your free time, and be an engineer on your CV. 
+
+Save this and follow for more F1 career breakdowns.
+
+Video_3 | process: N
 # Este está en Y pero sin texto real -> también se ignora.
 # Escribe aquí tu guion, una línea por renglón.
 
