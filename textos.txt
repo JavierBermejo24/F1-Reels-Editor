@@ -17,11 +17,27 @@
 # Líneas con # y líneas vacías se ignoran.
 # ==============================
 
-Video_1 | process: N
-Aero Performance & Aero Design are not the same.
-The Aero Performance Engineer is the one in charge of Analysing track data, understanding performance losses after crashes or wind gusts and ensuring the car performs as expected.
-Coding proficiency is required to pull, manipulate and interpret the data.
-The Aero Designer, on the other hand, Designs the aerodynamic package of the car, requiring a deeper understanding of how air particles travel around the car.
+Video_1 | process: Y
+[Young British professional, mid-20s, contemporary Southern English accent, medium pitch, slightly textured voice, intelligent, confident, approachable, natural conversational pacing, subtle enthusiasm, authentic and unpolished.]
+
+You could spend years trying to land your dream job in Formula 1… 
+only to realise you hate what you actually do.
+
+And the worst part? You might have chosen the wrong role without even knowing it.
+
+If you want to become an Formula 1 aerodynamics engineer, 
+you need to understand the difference between Aero Performance and Aero Design.
+
+Aero Performance is all about understanding how the car performs on track, analysing live telemetry.
+
+Aero Design, on the other hand, is about creating the aerodynamic package itself 
+by understanding how air flows around the car.
+
+Be honest… are you a data-driven problem solver
+or the person who wants to design the next championship-winning aero package? 
+
+Drop PERFORMANCE or DESIGN in the comments for a 
+link the current open F1 aerodynamics jobs!
 
 Video_2 | process: Y
 

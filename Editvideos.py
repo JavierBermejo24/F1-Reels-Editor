@@ -47,34 +47,33 @@ BRICK_EXTS = (".mp4", ".mov", ".m4v")
 
 # --- END CARD: fundido a negro + logo RC 1.5s ---
 ENDCARD_ACTIVO = True
-ENDCARD_LOGO = os.path.join(CARPETA_SCRIPT, "RC-Logo on Black Full.jpg")
-ENDCARD_DUR = 1.5                # el cierre ocupa los últimos 1.5s (no alarga el video)
+ENDCARD_LOGO = os.path.join(CARPETA_SCRIPT, "RC-Logo White Full - PNG.png")
+ENDCARD_DUR = 2.0                # el cierre ocupa los últimos 2s (no alarga el video)
 ENDCARD_ANCHO_PCT = 0.86         # ancho del logo respecto al video
-ENDCARD_FADE_NEGRO = 0.9         # fundido del negro (fade-through-black, más progresivo)
-ENDCARD_LOGO_DELAY = 0.35        # el logo aparece 0.35s tras empezar el negro
-ENDCARD_LOGO_FADE = 0.5          # fundido de entrada del logo (lineal)
-ENDCARD_LOGO_ZOOM = (0.94, 1.0)  # escala suave 0.94 -> 1.0 durante su aparición
+ENDCARD_FADE_NEGRO = 1.2         # fundido del negro (fade-through-black)
+ENDCARD_LOGO_DELAY = 0.3         # el logo aparece 0.3s tras empezar el negro
+ENDCARD_LOGO_FADE = 1.0          # fundido de opacidad del logo (colores originales desde el inicio)
+ENDCARD_FADE_OUT = 0.6           # fundido a negro de salida en los últimos 0.6s
 
-# --- VOICE OVER: gratis (edge-tts) por defecto / pago (OpenRouter) para final ---
-# TTS_BACKEND: "edge" (gratis, AvaNeural) | "openrouter" (elevenlabs/eleven-v4, pago)
-# Cambia con env: TTS_BACKEND=openrouter para la voz final de pago.
-TTS_BACKEND = os.getenv("TTS_BACKEND", "edge").strip().lower()
+# --- VOICE OVER: pago (OpenRouter) por defecto / gratis (edge-tts) para pruebas ---
+# TTS_BACKEND: "openrouter" (google/gemini-3.8-flash-tts voz Puck, pago) | "edge" (gratis, AvaNeural)
+# Cambia con env: TTS_BACKEND=edge para pruebas gratis con AvaNeural.
+TTS_BACKEND = os.getenv("TTS_BACKEND", "openrouter").strip().lower()
 EDGE_VOICE = os.getenv("EDGE_VOICE", "en-US-AvaNeural")  # AvaNeural Female USA (gratis)
-# --- OpenRouter (pago, voz final) — se conserva para la versión definitiva ---
-# Model page: https://openrouter.ai/elevenlabs/eleven-v4
+# --- OpenRouter (pago, voz final) ---
+# Model page: https://openrouter.ai/google/gemini-3.8-flash-tts
 # Endpoint: POST https://openrouter.ai/api/v1/audio/speech
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-OPENROUTER_TTS_MODEL = os.getenv("OPENROUTER_TTS_MODEL", "elevenlabs/eleven-v4")
-OPENROUTER_VOICE = os.getenv("OPENROUTER_VOICE", "george")
-OPENROUTER_RESPONSE_FORMAT = os.getenv("OPENROUTER_RESPONSE_FORMAT", "mp3")
+OPENROUTER_TTS_MODEL = os.getenv("OPENROUTER_TTS_MODEL", "google/gemini-3.8-flash-tts")
+OPENROUTER_VOICE = os.getenv("OPENROUTER_VOICE", "Puck")
+OPENROUTER_RESPONSE_FORMAT = os.getenv("OPENROUTER_RESPONSE_FORMAT", "pcm")
 VOLUMEN_VIDEO_ORIGINAL = 0.0
 GENERAR_SRT = True
 # --- ENTREGA VIRAL REELS (Instagram) ---
-# Ritmo: narración ~30% más rápida que conversacional (rápida pero inteligible
-# en short-form con subtítulos grandes). El atempo local preserva el tono.
-# eleven-v4 no acepta `speed` en la API (devuelve 400) -> se acelera con ffmpeg.
-VELOCIDAD_VOZ = 1.3
-# Tono/energía: la API de OpenRouter ignora `instructions` en elevenlabs
+# Ritmo: Gemini/Puck ya entrega rápido y enérgico de por sí (+ punch textual),
+# más un +5% local. El atempo preserva el tono.
+VELOCIDAD_VOZ = 1.05
+# Tono/energía: la API de OpenRouter ignora `instructions` en este proveedor
 # (solo la honran OpenAI/Gemini/Fish), así que la energía se dirige en el
 # TEXTO (100% compatible y sin cambiar nº de palabras -> el alineamiento
 # de subtítulos sigue exacto):
@@ -88,7 +87,9 @@ SUBTITULO_Y_PCT = 0.62           # Posición vertical
 SUBTITULO_FONT_SIZE_PCT = 0.066  # +20% sobre 0.055 para texto más grande
 SUBTITULO_MAX_WORDS_LINE = 20    # Tope de seguridad; el límite real es el ancho de pantalla
 SUBTITULO_ESCALA_ACTIVA = 1.10   # La palabra activa se agranda un 10%
-SUBTITULO_ADELANTO = 0.04        # Mostrar cada palabra 40ms antes (compensa latencia percibida)
+SUBTITULO_ADELANTO = 0.12         # Mostrar cada palabra 120ms antes: compensa el lag
+                                 # de los word-timestamps de whisper (~100ms tardíos)
+                                 # + la latencia percibida en el móvil
 SUBTITULO_COLOR_BASE = (255, 255, 255, 255)      # Palabras inactivas: blanco relleno
 # Palabra activa: azul sólido #01abfe, SIN contorno negro
 SUBTITULO_COLOR_ACTIVA = (0x01, 0xAB, 0xFE, 255)  # #01abfe sólido
@@ -122,6 +123,10 @@ FUENTES_MONTSERRAT = [
 ]
 
 THREADS = 4
+# Instrucciones de dirección de voz por bloque (líneas [...] en textos.txt).
+# Se rellenan en cada llamada a parsear_txt. No se narran ni subtitulan:
+# se envían como `instructions` al TTS (Gemini) y se ignoran en edge-tts.
+INSTRUCCIONES_POR_VIDEO = {}
 # =======================================
 
 def encontrar_fuente():
@@ -173,7 +178,20 @@ def parsear_txt(ruta):
 
     Devuelve dict ordenado: {nombre: (process_bool, [lineas_guion])}.
     Solo deben procesarse los que tengan process=True Y lista no vacía.
+
+    Dirección de voz: las líneas envueltas en [...] (p. ej. la descripción
+    "[Young British professional, ...]") NO se narran ni subtitulan; se
+    guardan en INSTRUCCIONES_POR_VIDEO[nombre] y se envían como `instructions`
+    al TTS. Varias líneas [...] en un bloque se concatenan con espacio.
     """
+    global INSTRUCCIONES_POR_VIDEO
+    INSTRUCCIONES_POR_VIDEO = {}
+
+    def _direccion_voz(linea):
+        t = linea.strip()
+        if len(t) > 2 and t.startswith("[") and t.endswith("]"):
+            return t[1:-1].strip()
+        return None
     if not os.path.exists(ruta):
         raise FileNotFoundError(f"No encuentro el archivo: {ruta}")
 
@@ -231,8 +249,13 @@ def parsear_txt(ruta):
     if not hay_cabecera:
         # Modo legacy: todo el archivo es el guion de UN video
         guiones = []
+        instrucciones = []
         for linea in lineas_raw:
             if not linea or linea.startswith('#'):
+                continue
+            dv = _direccion_voz(linea)
+            if dv:
+                instrucciones.append(dv)
                 continue
             if '|' in linea:
                 posible_tiempo, _, posible_texto = linea.rpartition('|')
@@ -240,6 +263,7 @@ def parsear_txt(ruta):
                     linea = posible_texto.strip()
             if linea:
                 guiones.append(linea)
+        INSTRUCCIONES_POR_VIDEO["__SINGLE__"] = " ".join(instrucciones).strip()
         return {"__SINGLE__": (True, guiones)}
 
     # Modo multi-video
@@ -275,6 +299,12 @@ def parsear_txt(ruta):
             # Si no es Video_N ni .mp4, es guion normal -> sigue abajo
 
         # Línea de guion (compat: prefijo 'inicio-fin |')
+        # (las líneas [...] son dirección de voz, no narración)
+        dv = _direccion_voz(linea)
+        if dv and actual is not None:
+            INSTRUCCIONES_POR_VIDEO[actual] = (
+                (INSTRUCCIONES_POR_VIDEO.get(actual, "") + " " + dv).strip())
+            continue
         texto = linea
         if '|' in texto:
             posible_tiempo, _, posible_texto = texto.rpartition('|')
@@ -326,7 +356,7 @@ def resolver_video_entrada(bloques=None):
         return ruta, nombre, guiones
     return ruta, nombre, None
 
-# ---------- TTS (OpenRouter -> elevenlabs/eleven-v4) ----------
+# ---------- TTS (OpenRouter -> google/gemini-3.8-flash-tts, voz Puck) ----------
 # POST https://openrouter.ai/api/v1/audio/speech
 # Devuelve audio crudo (no JSON), sin timestamps -> alineación local.
 # Si faster-whisper está instalado se usa para word-timestamps reales;
@@ -464,13 +494,27 @@ def _edge_tts(texto, ruta, voice=None):
             raise
 
 
-def _openrouter_tts(texto, ruta, voice=None):
-    """Sintetiza con elevenlabs/eleven-v4 vía OpenRouter y guarda en `ruta`.
+def _pcm_a_wav_bytes(pcm, sr=24000, ch=1, bits=16):
+    """Envuelve PCM crudo (16-bit LE mono 24kHz, salida de Gemini) en WAV."""
+    import struct
+    n = len(pcm)
+    byte_rate = sr * ch * bits // 8
+    block = ch * bits // 8
+    head = struct.pack('<4sI4s4sIHHIIHH4sI',
+                       b'RIFF', 36 + n, b'WAVE', b'fmt ', 16, 1,
+                       ch, sr, byte_rate, block, bits, b'data', n)
+    return head + pcm
+
+
+def _openrouter_tts(texto, ruta, voice=None, instructions=None):
+    """Sintetiza con google/gemini-3.8-flash-tts vía OpenRouter.
+
+    Devuelve la ruta real del audio. Gemini solo admite response_format="pcm":
+    los bytes crudos (16-bit LE mono 24kHz) se envuelven en WAV al vuelo para
+    que el resto del pipeline (atempo, whisper, moviepy) los lea sin cambios.
 
     Docs: https://openrouter.ai/docs/api/api-reference/tts/create-speech
-    Voces: george|sarah|adam|alice|bella|bill|brian|callum|charlie|chris|
-           daniel|eric|harry|jessica|laura|liam|lily|matilda|river|roger|will
-    response_format: mp3|pcm (mp3 recomendado)
+    Voces Gemini: Puck|Zephyr|Charon|Kore|Fenrir|Leda|Orus|Aoede|Callirrhoe|...
     """
     if not OPENROUTER_API_KEY:
         raise RuntimeError("Falta OPENROUTER_API_KEY en el entorno (.env).")
@@ -480,37 +524,65 @@ def _openrouter_tts(texto, ruta, voice=None):
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
     }
     payload = {
-        "model": OPENROUTER_TTS_MODEL,  # "elevenlabs/eleven-v4"
+        "model": OPENROUTER_TTS_MODEL,  # "google/gemini-3.8-flash-tts"
         "input": texto,
-        "voice": voice or OPENROUTER_VOICE,  # ej. "george"
-        "response_format": OPENROUTER_RESPONSE_FORMAT,  # "mp3" | "pcm"
+        "voice": voice or OPENROUTER_VOICE,  # ej. "Puck"
+        "response_format": OPENROUTER_RESPONSE_FORMAT,  # "pcm" (Gemini no admite mp3)
     }
-    resp = requests.post(url, json=payload, headers=headers, timeout=120)
+    if instructions:
+        payload["instructions"] = instructions
+
+    def _post(pl):
+        return requests.post(url, json=pl, headers=headers, timeout=120)
+
+    resp = _post(payload)
     if resp.status_code != 200:
-        # Errores típicos: 400 param no soportado, 401 key inválida,
-        # 402 sin créditos, 403 límite/gasto, 404 modelo no disponible,
-        # 429 rate-limit, 502 fallo upstream (no facturado)
+        # Errores típicos: 400 param no soportado (p. ej. `instructions` en un
+        # proveedor que no lo honra), 401 key inválida, 402 sin créditos,
+        # 403 límite/gasto, 404 modelo no disponible, 429 rate-limit,
+        # 502 fallo upstream (no facturado)
         try:
             detalle = resp.json()
         except Exception:
             detalle = resp.text[:500]
-        raise RuntimeError(f"OpenRouter TTS {resp.status_code}: {detalle}")
+        if resp.status_code == 400 and instructions:
+            print(f"   ⚠️  El proveedor rechazó `instructions`, reintento sin ellas.")
+            payload = {k: v for k, v in payload.items() if k != "instructions"}
+            resp = _post(payload)
+            if resp.status_code != 200:
+                try:
+                    detalle = resp.json()
+                except Exception:
+                    detalle = resp.text[:500]
+                raise RuntimeError(f"OpenRouter TTS {resp.status_code}: {detalle}")
+        else:
+            raise RuntimeError(f"OpenRouter TTS {resp.status_code}: {detalle}")
     # Éxito = bytes de audio crudo, NO llamar a resp.json()
-    # Content-Type será audio/mpeg (mp3) o audio/pcm (pcm)
+    data = resp.content
+    if data[:4] == b'RIFF':
+        pass  # ya es WAV con cabecera
+    elif OPENROUTER_RESPONSE_FORMAT.lower() == "pcm":
+        data = _pcm_a_wav_bytes(data)  # PCM crudo -> WAV 24kHz mono
+    if ruta.lower().endswith(".mp3") and data[:4] == b'RIFF':
+        ruta = ruta[:-4] + ".wav"
     with open(ruta, "wb") as f:
-        f.write(resp.content)
+        f.write(data)
+    return ruta
 
 
 def _acelerar_audio(ruta, factor):
-    """Acelera un mp3 in-place con ffmpeg atempo (preserva el tono).
-    eleven-v4 no soporta `speed`, así que se hace localmente."""
+    """Acelera un audio in-place con ffmpeg atempo (preserva el tono).
+    el `speed` de la API no se usa (otros proveedores lo ignoran o devuelven 400); se acelera localmente.
+    Intermedio en WAV sin pérdida + remuestreo a 44100 (el MP3 intermedio
+    a bitrate por defecto sonaba metálico)."""
     if factor == 1.0:
         return True
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
-    tmp = ruta + ".fast.mp3"
-    # atempo acepta 0.5-2.0 en un solo filtro; 1.3 va directo
+    tmp = ruta + ".fast.wav"
+    # atempo acepta 0.5-2.0 en un solo filtro; 1.05 va directo
     cmd = [ffmpeg, "-y", "-v", "error", "-i", ruta,
-           "-filter:a", f"atempo={factor}", "-vn", tmp]
+           "-filter:a", f"atempo={factor},aresample=44100",
+           "-c:a", "pcm_s16le", "-vn", tmp]
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0 or not os.path.exists(tmp):
         print(f"   ⚠️  No se pudo acelerar audio ({res.stderr.strip()[:200]}), se usa velocidad normal.")
@@ -560,12 +632,12 @@ def _estilo_reels(texto):
     return texto, (texto != original)
 
 
-def generar_voz_con_palabras(texto, ruta, target_dur=None, voice_id=None):
-    """Genera voz y devuelve ([(w,start,end)], dur).
+def generar_voz_con_palabras(texto, ruta, target_dur=None, voice_id=None, instructions=None):
+    """Genera voz y devuelve ([(w,start,end)], dur, ruta_audio_real).
 
     Backend según TTS_BACKEND:
       - "edge" (gratis, pruebas): edge-tts en-US-AvaNeural.
-      - "openrouter" (pago, final): elevenlabs/eleven-v4 vía OpenRouter.
+      - "openrouter" (pago, final): google/gemini-3.8-flash-tts (voz Puck) vía OpenRouter.
 
     Timing (en orden): 1) faster-whisper si disponible (real), 2) reparto
     mejorado por peso de palabra entre silencios medidos. Al final se
@@ -581,17 +653,19 @@ def generar_voz_con_palabras(texto, ruta, target_dur=None, voice_id=None):
     if backend == "openrouter":
         vid = voice_id or OPENROUTER_VOICE
         try:
-            _openrouter_tts(texto, ruta, voice=vid)
+            if instructions:
+                print(f"   🎭 Dirección de voz: {instructions[:90]}...")
+            ruta = _openrouter_tts(texto, ruta, voice=vid, instructions=instructions)
         except Exception as e:
-            print(f"   ❌ TTS OpenRouter eleven-v4 error: {e}")
-            return [], 0.0
+            print(f"   ❌ TTS OpenRouter error: {e}")
+            return [], 0.0, ruta
     else:
         vid = voice_id or EDGE_VOICE
         try:
             _edge_tts(texto, ruta, voice=vid)
         except Exception as e:
             print(f"   ❌ TTS edge-tts ({vid}) error: {e}")
-            return [], 0.0
+            return [], 0.0, ruta
     try:
         if VELOCIDAD_VOZ != 1.0:
             _acelerar_audio(ruta, VELOCIDAD_VOZ)
@@ -600,7 +674,7 @@ def generar_voz_con_palabras(texto, ruta, target_dur=None, voice_id=None):
         a.close()
     except Exception as e:
         print(f"   ❌ No se pudo leer el audio TTS: {e}")
-        return [], 0.0
+        return [], 0.0, ruta
     # 1) Timestamps reales si hay whisper
     words = _alinear_con_whisper(ruta, texto)
     # 2) Fallback mejorado: recorta aire inicial/final y reparte por peso
@@ -613,7 +687,7 @@ def generar_voz_con_palabras(texto, ruta, target_dur=None, voice_id=None):
     if SUBTITULO_ADELANTO:
         words = [(w, max(0.0, s - SUBTITULO_ADELANTO), max(0.01, e - SUBTITULO_ADELANTO))
                  for w, s, e in words]
-    return words, dur
+    return words, dur, ruta
 
 # ---------- RENDERIZADO DE SUBTÍTULOS ----------
 def _crear_fuentes(fuente_path, video_w):
@@ -838,19 +912,22 @@ def construir_endcard(video_w, video_h):
         return None, []
     negro = ColorClip(size=(video_w, video_h), color=(0, 0, 0)).set_duration(ENDCARD_DUR)
     negro = negro.set_mask(_mascara_fundido((video_w, video_h), ENDCARD_DUR, ENDCARD_FADE_NEGRO))
+    # Logo PNG blanco con transparencia: fundido de OPACIDAD combinado con
+    # su alpha nativo (NO set_mask con rampa uniforme: eso borraría la
+    # transparencia y saldría un rectángulo). Tampoco vale fadein RGB: a 0%
+    # mostraría la silueta del logo en negro. Así entra con sus colores
+    # originales. Tamaño fijo: el resize animado desincroniza la máscara
+    # en moviepy 1.0.3 y el texto fino se ve hueco.
     logo_w = int(video_w * ENDCARD_ANCHO_PCT)
     logo = ImageClip(ENDCARD_LOGO).resize(width=logo_w)
     logo = logo.set_position("center").set_duration(ENDCARD_DUR - ENDCARD_LOGO_DELAY)
-    # Zoom suave durante la aparición.
-    # OJO: el resize animado va ANTES del set_mask (moviepy 1.0.3 rompe
-    # la máscara float si se redimensiona después).
-    z0, z1 = ENDCARD_LOGO_ZOOM
-    try:
-        logo = logo.resize(lambda t: z0 + (z1 - z0) * min(max(t, 0.0) / max(logo.duration, 0.01), 1.0))
-    except Exception:
-        pass
-    logo = logo.set_mask(_mascara_fundido(logo.size, logo.duration, ENDCARD_LOGO_FADE))
-    logo = logo.set_start(ENDCARD_LOGO_DELAY)  # el fade lo lleva su máscara
+    if logo.mask is not None:
+        _fd = max(ENDCARD_LOGO_FADE, 1e-6)
+        logo.mask = logo.mask.fl(
+            lambda gf, t: np.clip(gf(t).astype(float), 0, 1) * min(max(t, 0.0) / _fd, 1.0))
+    else:
+        logo = logo.set_mask(_mascara_fundido(logo.size, logo.duration, ENDCARD_LOGO_FADE))
+    logo = logo.set_start(ENDCARD_LOGO_DELAY)
     endcard = CompositeVideoClip([negro, logo], size=(video_w, video_h)).set_duration(ENDCARD_DUR)
     return endcard, [logo]
 
@@ -1081,7 +1158,7 @@ def construir_broll(target_dur):
     return concat, abiertos, sel_info
 
 # ---------- EDICIÓN (B-roll aleatorio + voz) ----------
-def editar_video(nombre, guiones, fuente, carpeta_temp, ruta_in=None):
+def editar_video(nombre, guiones, fuente, carpeta_temp, ruta_in=None, instructions=None):
     """Guion -> TTS -> B-roll aleatorio desde 'Post Processed Videos'.
 
     1) Genera la voz (1 llamada TTS) y mide dur_audio.
@@ -1094,6 +1171,8 @@ def editar_video(nombre, guiones, fuente, carpeta_temp, ruta_in=None):
 
     `ruta_in` queda solo como fallback legacy: si no hay bricks pero existe
     ese archivo, se usa como fondo (comportamiento anterior).
+    `instructions`: dirección de voz (líneas [...] de textos.txt); solo la
+    usan los proveedores que la honran (Gemini), el resto la ignora.
     """
     ruta_out = os.path.join(CARPETA_SALIDA, f"{nombre}.mp4")
     guiones_limpios = [t.strip() for t in guiones if t.strip()]
@@ -1116,7 +1195,8 @@ def editar_video(nombre, guiones, fuente, carpeta_temp, ruta_in=None):
         ruta_audio = os.path.join(carpeta_temp, f"{nombre}_full.mp3")
         _voz_default = OPENROUTER_VOICE if (TTS_BACKEND or "edge").lower() == "openrouter" else EDGE_VOICE
         print(f"   🎙️  TTS {TTS_BACKEND} ({_voz_default}, 1 llamada, {len(guiones_limpios)} bloques): {texto_full[:60]}...")
-        words_full, dur_audio = generar_voz_con_palabras(texto_full, ruta_audio, None, None)
+        words_full, dur_audio, ruta_audio = generar_voz_con_palabras(
+            texto_full, ruta_audio, None, None, instructions=instructions)
         if dur_audio <= 0 or not os.path.exists(ruta_audio):
             print(f"   ❌ TTS falló, no se puede armar B-roll sin duración objetivo.")
             return False
@@ -1213,6 +1293,13 @@ def editar_video(nombre, guiones, fuente, carpeta_temp, ruta_in=None):
                     print(f"   🏁 Endcard: fundido a negro + logo últimos {ENDCARD_DUR}s.")
         except Exception as e_ec:
             print(f"   ⚠️  Endcard falló ({str(e_ec)[:150]}), se sigue sin cierre.")
+
+        # --- Fundido a negro de salida (cierre suave del video) ---
+        try:
+            if ENDCARD_FADE_OUT > 0:
+                final = final.fadeout(ENDCARD_FADE_OUT)
+        except Exception:
+            pass
 
         if pistas_audio:
             final = final.set_audio(CompositeAudioClip(pistas_audio))
@@ -1314,7 +1401,8 @@ def main():
         print(f"\n🎬 {nombre_man} ({len(guiones_man)} bloques) <- {ruta_man} [override manual]")
         carpeta_temp = tempfile.mkdtemp(prefix="voz_")
         try:
-            if editar_video(nombre_man, guiones_man, fuente, carpeta_temp, ruta_in=ruta_man):
+            if editar_video(nombre_man, guiones_man, fuente, carpeta_temp, ruta_in=ruta_man,
+                            instructions=INSTRUCCIONES_POR_VIDEO.get(nombre_man, "")):
                 print(f"   ✅ Guardado en Videos_Editados/{nombre_man}.mp4")
             else:
                 print(f"\n❌ Falló la edición de {nombre_man}.")
@@ -1329,7 +1417,8 @@ def main():
         print(f"\n🎬 {nombre} ({len(guiones)} bloques) <- B-roll aleatorio [legacy sin cabeceras]")
         carpeta_temp = tempfile.mkdtemp(prefix="voz_")
         try:
-            if editar_video(nombre, guiones, fuente, carpeta_temp, ruta_in=None):
+            if editar_video(nombre, guiones, fuente, carpeta_temp, ruta_in=None,
+                            instructions=INSTRUCCIONES_POR_VIDEO.get("__SINGLE__", "")):
                 print(f"   ✅ Guardado en Videos_Editados/{nombre}.mp4")
         finally:
             shutil.rmtree(carpeta_temp, ignore_errors=True)
@@ -1360,7 +1449,8 @@ def main():
     try:
         for nombre, guiones, ruta_in in pendientes:
             print(f"\n🎬 {nombre} ({len(guiones)} bloques) <- {ruta_in}")
-            if editar_video(nombre, guiones, fuente, carpeta_temp, ruta_in=ruta_in):
+            if editar_video(nombre, guiones, fuente, carpeta_temp, ruta_in=ruta_in,
+                            instructions=INSTRUCCIONES_POR_VIDEO.get(nombre, "")):
                 print(f"   ✅ Guardado en Videos_Editados/{nombre}.mp4")
                 ok += 1
             else:
